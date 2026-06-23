@@ -29,6 +29,7 @@ RUN curl -fsSL https://github.com/gammu/gammu/archive/refs/tags/1.43.2.tar.gz \
 
 WORKDIR /build
 COPY requirements.txt .
+ENV CFLAGS="-Wno-return-mismatch"
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 
@@ -37,6 +38,7 @@ FROM python:3.12-slim
 
 # Copy the Gammu shared library from the build stage
 COPY --from=builder /usr/local/lib/libGammu* /usr/local/lib/
+COPY --from=builder /usr/local/lib/libgsmsd* /usr/local/lib/
 RUN ldconfig
 
 WORKDIR /app
@@ -44,9 +46,9 @@ WORKDIR /app
 COPY --from=builder /install /usr/local
 COPY modem_daemon.py ./
 
-# dialout gives access to serial/USB modem devices
+# dialout gives access to serial/USB modem devices (GID 20 = dialout on Debian)
 RUN groupadd -g 20 dialout_host 2>/dev/null || true \
-    && useradd -r -u 1000 -g dialout_host modem
+    && useradd -r -u 1000 -g 20 modem
 
 USER modem
 
