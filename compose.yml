@@ -6,7 +6,7 @@ services:
       - "8080:8080"
     devices:
       # adjust to match your modem's device node
-      - /dev/sim_modem:/dev/ttyUSB0
+      - /dev/sim_modem:/dev/sim_modem
     volumes:
       - ./data:/data
       - ./gammurc:/etc/gammurc:ro        # gammu config file
