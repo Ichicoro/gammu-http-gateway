@@ -1,0 +1,5 @@
+.env
+sms.db
+data/*
+./gammurc
+./scripts/*

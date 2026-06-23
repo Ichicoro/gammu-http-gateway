@@ -1,0 +1,18 @@
+[Unit]
+Description=Modem Daemon — SMS poller and modem data API
+After=network.target
+
+[Service]
+Type=simple
+User=modem
+Group=dialout
+WorkingDirectory=/opt/sms-handler
+EnvironmentFile=/etc/sms-handler/env
+ExecStart=/opt/sms-handler/.venv/bin/python /opt/sms-handler/modem_daemon.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
