@@ -1,22 +1,43 @@
-# Stage 1 — build python-gammu against libgammu headers
+# Stage 1 — build Gammu 1.43.2 from source, then python-gammu against it
 FROM python:3.12-slim AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc \
-        libgammu-dev \
+        g++ \
+        cmake \
+        make \
+        curl \
+        pkg-config \
     && rm -rf /var/lib/apt/lists/*
+
+# Build Gammu 1.43.2 into /usr/local so pkg-config finds Gammu.pc without PATH tricks.
+# python-gammu 3.2.6 requires >= 1.43.0; Debian only ships 1.42.0.
+WORKDIR /gammu-src
+RUN curl -fsSL https://github.com/gammu/gammu/archive/refs/tags/1.43.2.tar.gz \
+    | tar -xz --strip-components=1 \
+ && cmake -B build \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_SHARED_LIBS=ON \
+        -DWITH_Libusb=OFF \
+        -DWITH_MySQL=OFF \
+        -DWITH_Postgres=OFF \
+        -DWITH_CURL=OFF \
+        -DWITH_Bluetooth=OFF \
+ && cmake --build build -j"$(nproc)" \
+ && cmake --install build
 
 WORKDIR /build
 COPY requirements.txt .
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 
-# Stage 2 — runtime only (no compiler, no headers)
+# Stage 2 — runtime (no compiler, no headers)
 FROM python:3.12-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        libgammu8 \
-    && rm -rf /var/lib/apt/lists/*
+# Copy the Gammu shared library from the build stage
+COPY --from=builder /usr/local/lib/libGammu* /usr/local/lib/
+RUN ldconfig
 
 WORKDIR /app
 
