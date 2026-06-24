@@ -75,6 +75,12 @@ GAMMU_TIMEOUT = 15  # seconds before a hung modem call is abandoned
 # Gammu helpers (all blocking — run in executor)
 # ---------------------------------------------------------------------------
 
+def _reset_state_machine():
+    global _sm
+    with _sm_lock:
+        _sm = None
+
+
 def _get_state_machine() -> gammu.StateMachine:
     global _sm
     with _sm_lock:
@@ -394,7 +400,9 @@ async def task_poll_sms():
                 loop.run_in_executor(_executor, _read_all_sms), timeout=GAMMU_TIMEOUT
             )
         except Exception as exc:
-            log.error("SMS read failed: %s", exc)
+            log.error("SMS read failed: %s", exc or type(exc).__name__)
+            if isinstance(exc, asyncio.TimeoutError):
+                _reset_state_machine()
             continue
 
         for msg in messages:
@@ -457,7 +465,9 @@ async def task_broadcast_status():
                     })
                 )
         except Exception as exc:
-            log.error("Status broadcast failed: %s", exc)
+            log.error("Status broadcast failed: %s", exc or type(exc).__name__)
+            if isinstance(exc, asyncio.TimeoutError):
+                _reset_state_machine()
 
 
 # ---------------------------------------------------------------------------
