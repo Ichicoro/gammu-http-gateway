@@ -310,6 +310,8 @@ async def _call_webhook(url: str, payload: dict):
             async with session.post(url, json=payload) as resp:
                 if resp.status >= 400:
                     log.warning("[webhook] %s returned %d", url, resp.status)
+                else:
+                    log.info("[webhook] %s returned %d", url, resp.status)
     except Exception as exc:
         log.error("[webhook] %s failed: %s", url, exc)
 

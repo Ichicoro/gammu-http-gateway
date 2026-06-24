@@ -21,14 +21,25 @@ log = logging.getLogger("sms_webhook")
 
 
 async def handle_sms(req: web.Request) -> web.Response:
-    data = await req.json()
+    try:
+        data = await req.json()
+    except Exception as exc:
+        log.error("Bad request body: %s", exc)
+        return web.Response(status=400)
+
     number = data.get("number", "unknown")
     text = data.get("text", "")
 
     log.info("SMS from %s: %s", number, text)
 
-    # Put your logic here — forward to Slack, trigger automation, etc.
+    try:
+        # Put your logic here — forward to Slack, trigger automation, etc.
+        pass
+    except Exception as exc:
+        log.error("Handler failed for SMS from %s: %s", number, exc)
+        return web.Response(status=500)
 
+    log.info("SMS from %s handled successfully", number)
     return web.Response(status=200)
 
 
