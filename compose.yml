@@ -2,8 +2,7 @@ services:
   modem-daemon:
     build: .
     restart: unless-stopped
-    ports:
-      - "8080:8080"
+    network_mode: host
     devices:
       # adjust to match your modem's device node
       - /dev/sim_modem:/dev/sim_modem
@@ -13,7 +12,7 @@ services:
       - ${SCRIPTS_DIR:-./scripts}:/scripts:ro
     environment:
       HOST: "0.0.0.0"
-      PORT: "8080"
+      PORT: "${PORT:-8080}"
       POLL_INTERVAL: "${POLL_INTERVAL:-30}"
       STATUS_INTERVAL: "${STATUS_INTERVAL:-60}"
       DB_PATH: "/data/sms.db"
