@@ -242,6 +242,14 @@ async def _run(fn, *args):
     )
 
 
+_DASHBOARD_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.html")
+
+
+async def handle_dashboard(_req: web.Request) -> web.Response:
+    with open(_DASHBOARD_PATH) as f:
+        return web.Response(text=f.read(), content_type="text/html")
+
+
 async def handle_status(req: web.Request) -> web.Response:
     network, signal, battery = await asyncio.gather(
         _run(_network_info),
@@ -470,6 +478,7 @@ async def main():
         sys.exit(1)
 
     app = web.Application()
+    app.router.add_get("/", handle_dashboard)
     app.router.add_get("/status", handle_status)
     app.router.add_get("/network", handle_network)
     app.router.add_get("/signal", handle_signal)

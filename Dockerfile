@@ -45,6 +45,7 @@ WORKDIR /app
 
 COPY --from=builder /install /usr/local
 COPY modem_daemon.py ./
+COPY dashboard.html ./
 
 # dialout gives access to serial/USB modem devices (GID 20 = dialout on Debian)
 RUN groupadd -g 20 dialout_host 2>/dev/null || true \
