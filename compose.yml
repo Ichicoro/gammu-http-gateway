@@ -22,4 +22,4 @@ services:
       ON_STATUS_SCRIPT: "${ON_STATUS_SCRIPT:-}"
       ON_STATUS_WEBHOOK: "${ON_STATUS_WEBHOOK:-}"
     env_file:
-      - .env                             # PUSHOVER_USER_KEY, PUSHOVER_APP_TOKEN, etc.
+      - .env
