@@ -15,9 +15,12 @@ Usage:
 from aiohttp import web
 import logging
 import sys
+import os
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stdout)
 log = logging.getLogger("sms_webhook")
+
+WEBHOOK_PORT = int(os.environ.get("WEBHOOK_PORT", 9000))
 
 
 async def handle_sms(req: web.Request) -> web.Response:
@@ -47,4 +50,4 @@ app = web.Application()
 app.router.add_post("/sms", handle_sms)
 
 if __name__ == "__main__":
-    web.run_app(app, host="0.0.0.0", port=9000)
+    web.run_app(app, host="0.0.0.0", port=WEBHOOK_PORT)
