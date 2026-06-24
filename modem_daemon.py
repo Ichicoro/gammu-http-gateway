@@ -33,12 +33,14 @@ import logging
 import os
 import sqlite3
 import sys
+import threading
 import dotenv
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Optional
 
 import gammu
+import aiohttp
 from aiohttp import web, ClientSession
 
 dotenv.load_dotenv()
@@ -61,9 +63,12 @@ DB_PATH = os.environ.get("DB_PATH", "sms.db")
 GAMMU_CONFIG = os.environ.get("GAMMU_CONFIG", "")
 STATUS_INTERVAL = int(os.environ.get("STATUS_INTERVAL", "60"))
 
-_executor = ThreadPoolExecutor(max_workers=2)
+_executor = ThreadPoolExecutor(max_workers=4)
 _ws_clients: set[web.WebSocketResponse] = set()
 _sm: Optional[gammu.StateMachine] = None
+_sm_lock = threading.Lock()
+
+GAMMU_TIMEOUT = 15  # seconds before a hung modem call is abandoned
 
 
 # ---------------------------------------------------------------------------
@@ -72,14 +77,15 @@ _sm: Optional[gammu.StateMachine] = None
 
 def _get_state_machine() -> gammu.StateMachine:
     global _sm
-    if _sm is None:
-        sm = gammu.StateMachine()
-        if GAMMU_CONFIG:
-            sm.ReadConfig(Filename=GAMMU_CONFIG)
-        else:
-            sm.ReadConfig()
-        sm.Init()
-        _sm = sm
+    with _sm_lock:
+        if _sm is None:
+            sm = gammu.StateMachine()
+            if GAMMU_CONFIG:
+                sm.ReadConfig(Filename=GAMMU_CONFIG)
+            else:
+                sm.ReadConfig()
+            sm.Init()
+            _sm = sm
     return _sm
 
 
@@ -230,7 +236,10 @@ async def _broadcast(data: dict):
 
 async def _run(fn, *args):
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(_executor, fn, *args)
+    return await asyncio.wait_for(
+        loop.run_in_executor(_executor, fn, *args),
+        timeout=GAMMU_TIMEOUT,
+    )
 
 
 async def handle_status(req: web.Request) -> web.Response:
@@ -306,7 +315,7 @@ async def _run_script(script: str, number: str, text: str):
 
 async def _call_webhook(url: str, payload: dict):
     try:
-        async with ClientSession() as session:
+        async with ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
             async with session.post(url, json=payload) as resp:
                 if resp.status >= 400:
                     log.warning("[webhook] %s returned %d", url, resp.status)
@@ -360,7 +369,9 @@ async def task_poll_sms():
     # the script for messages that already existed before this daemon started.
     known: set[int] = set()
     try:
-        existing = await loop.run_in_executor(_executor, _read_all_sms)
+        existing = await asyncio.wait_for(
+            loop.run_in_executor(_executor, _read_all_sms), timeout=GAMMU_TIMEOUT
+        )
         for m in existing:
             if m["location"] is not None:
                 known.add(m["location"])
@@ -371,7 +382,9 @@ async def task_poll_sms():
     while True:
         await asyncio.sleep(POLL_INTERVAL)
         try:
-            messages = await loop.run_in_executor(_executor, _read_all_sms)
+            messages = await asyncio.wait_for(
+                loop.run_in_executor(_executor, _read_all_sms), timeout=GAMMU_TIMEOUT
+            )
         except Exception as exc:
             log.error("SMS read failed: %s", exc)
             continue
@@ -411,9 +424,9 @@ async def task_broadcast_status():
             continue
         try:
             network, signal, battery = await asyncio.gather(
-                loop.run_in_executor(_executor, _network_info),
-                loop.run_in_executor(_executor, _signal_quality),
-                loop.run_in_executor(_executor, _battery_status),
+                asyncio.wait_for(loop.run_in_executor(_executor, _network_info), timeout=GAMMU_TIMEOUT),
+                asyncio.wait_for(loop.run_in_executor(_executor, _signal_quality), timeout=GAMMU_TIMEOUT),
+                asyncio.wait_for(loop.run_in_executor(_executor, _battery_status), timeout=GAMMU_TIMEOUT),
             )
             timestamp = datetime.now(timezone.utc).isoformat()
             if _ws_clients:
@@ -448,7 +461,9 @@ async def main():
 
     loop = asyncio.get_event_loop()
     try:
-        await loop.run_in_executor(_executor, _get_state_machine)
+        await asyncio.wait_for(
+            loop.run_in_executor(_executor, _get_state_machine), timeout=GAMMU_TIMEOUT
+        )
         log.info("Gammu initialized")
     except Exception as exc:
         log.error("Gammu init failed: %s", exc)
