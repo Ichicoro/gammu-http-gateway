@@ -16,15 +16,17 @@ Config (env vars):
   ON_STATUS_SCRIPT  path to script to exec on each status tick (default: none)
 
 HTTP endpoints:
-  GET /status       network + signal + battery
-  GET /network      network info
-  GET /signal       signal quality
-  GET /battery      battery status
-  GET /info         device info (IMEI, model, firmware)
-  GET /messages     messages from DB (?limit=N, default 100)
+  GET  /status      network + signal + battery
+  GET  /network     network info
+  GET  /signal      signal quality
+  GET  /battery     battery status
+  GET  /info        device info (IMEI, model, firmware)
+  GET  /messages    messages from DB (?limit=N, default 100)
+  POST /send        send SMS; body: {"number": "+1...", "text": "..."}
 
 WebSocket:
   WS /ws            receives {"event":"sms",...} and {"event":"status",...} pushes
+                    accepts {"action":"send","number":"...","text":"..."} to send SMS
 """
 
 import asyncio
@@ -175,6 +177,17 @@ def _read_all_sms() -> list[dict]:
     return messages
 
 
+def _send_sms(number: str, text: str) -> int:
+    """Send an SMS and return the message reference number."""
+    sm = _get_state_machine()
+    message = {
+        "Text": text,
+        "SMSC": {"Location": 1},
+        "Number": number,
+    }
+    return sm.SendSMS(message)
+
+
 # ---------------------------------------------------------------------------
 # SQLite
 # ---------------------------------------------------------------------------
@@ -291,14 +304,68 @@ async def handle_messages(req: web.Request) -> web.Response:
     return web.json_response(_db_messages(limit))
 
 
+async def handle_send(req: web.Request) -> web.Response:
+    try:
+        body = await req.json()
+    except Exception:
+        return web.json_response({"error": "invalid JSON"}, status=400)
+
+    number = str(body.get("number", "")).strip()
+    text = str(body.get("text", "")).strip()
+    if not number or not text:
+        return web.json_response({"error": "number and text required"}, status=400)
+
+    async def _do_send():
+        await _run(_send_sms, number, text)
+        now = datetime.now(timezone.utc).isoformat()
+        _db_save(number=number, text=text, date=now, direction="outgoing")
+        msg = {"number": number, "text": text, "date": now, "direction": "outgoing", "received_at": now}
+        await _broadcast({"event": "sms", "message": msg})
+        log.info("Sent SMS to %s", number)
+
+    if str(body.get("async", "")).lower() in ("1", "true", "yes"):
+        asyncio.create_task(_do_send())
+        return web.json_response({"ok": True, "queued": True})
+
+    try:
+        await _do_send()
+    except Exception as exc:
+        log.error("SendSMS failed: %s", exc)
+        return web.json_response({"error": str(exc)}, status=500)
+
+    return web.json_response({"ok": True})
+
+
 async def handle_ws(req: web.Request) -> web.WebSocketResponse:
     ws = web.WebSocketResponse()
     await ws.prepare(req)
     _ws_clients.add(ws)
     log.info("WS connected (total=%d)", len(_ws_clients))
     try:
-        async for _ in ws:
-            pass  # clients are receive-only; ignore any incoming frames
+        async for frame in ws:
+            if frame.type != aiohttp.WSMsgType.TEXT:
+                continue
+            try:
+                msg = json.loads(frame.data)
+            except Exception:
+                continue
+            if msg.get("action") == "send":
+                number = str(msg.get("number", "")).strip()
+                text = str(msg.get("text", "")).strip()
+                if not number or not text:
+                    await ws.send_str(json.dumps({"event": "send_result", "ok": False, "error": "number and text required"}))
+                    continue
+                try:
+                    await _run(_send_sms, number, text)
+                    now = datetime.now(timezone.utc).isoformat()
+                    _db_save(number=number, text=text, date=now, direction="outgoing")
+                    sent = {"number": number, "text": text, "date": now, "direction": "outgoing", "received_at": now}
+                    await _broadcast({"event": "sms", "message": sent})
+                    await ws.send_str(json.dumps({"event": "send_result", "ok": True}))
+                    log.info("Sent SMS to %s (via WS)", number)
+                except Exception as exc:
+                    log.error("SendSMS (WS) failed: %s", exc)
+                    await ws.send_str(json.dumps({"event": "send_result", "ok": False, "error": str(exc)}))
     finally:
         _ws_clients.discard(ws)
         log.info("WS disconnected (total=%d)", len(_ws_clients))
@@ -495,6 +562,7 @@ async def main():
     app.router.add_get("/battery", handle_battery)
     app.router.add_get("/info", handle_device_info)
     app.router.add_get("/messages", handle_messages)
+    app.router.add_post("/send", handle_send)
     app.router.add_get("/ws", handle_ws)
 
     runner = web.AppRunner(app)
